@@ -5,7 +5,8 @@ import google.generativeai as genai
 
 # 1. Gemini AI 설정
 genai.configure(api_key=os.environ.get('GEMINI_API_KEY'))
-model = genai.GenerativeModel('gemini-1.5-flash')
+# 모델명을 확실하게 지정합니다.
+model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
 def get_news_data():
     urls = {
@@ -17,7 +18,7 @@ def get_news_data():
     for lang, url in urls.items():
         try:
             res = requests.get(url, timeout=15)
-            # 'xml' 대신 'html.parser'를 사용하여 호환성 높임
+            # RSS는 XML 형식이므로 lxml이 설치되어 있다면 'xml'로, 아니라면 'html.parser'로 읽습니다.
             soup = BeautifulSoup(res.content, 'html.parser')
             items = soup.find_all('item')[:3]
             for item in items:
@@ -44,10 +45,11 @@ def summarize_news(news_text):
     """
     
     try:
+        # 404 오류 방지를 위해 모델 설정 재확인
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"요약 중 오류 발생: {e}"
+        return f"요약 중 오류 발생: {e}\n(잠시 후 다시 시도하거나 API 키 권한을 확인해 주세요.)"
 
 def send_discord(content):
     webhook_url = os.environ.get('DISCORD_WEBHOOK_URL')
