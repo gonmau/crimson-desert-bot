@@ -1,64 +1,51 @@
 import requests
 from bs4 import BeautifulSoup
 import os
-from datetime import datetime
+import google.generativeai as genai
 
-def get_news(url, label):
-    try:
-        response = requests.get(url, timeout=15)
-        soup = BeautifulSoup(response.content, 'xml')
-        items = soup.find_all('item')[:3]
-        
-        print(f"[{label}] 검색 결과: {len(items)}개의 뉴스를 찾았습니다.") # 로그 출력
-        
-        results = []
+# 1. Gemini AI 설정
+genai.configure(api_key=os.environ.get('GEMINI_API_KEY'))
+model = genai.GenerativeModel('gemini-1.5-flash')
+
+def get_news_data():
+    urls = {
+        "국내": "https://news.google.com/rss/search?q=붉은사막&hl=ko&gl=KR&ceid=KR:ko",
+        "해외": "https://news.google.com/rss/search?q=Crimson+Desert+game&hl=en-US&gl=US&ceid=US:en"
+    }
+    
+    combined_text = ""
+    for lang, url in urls.items():
+        res = requests.get(url)
+        soup = BeautifulSoup(res.content, 'xml')
+        items = soup.find_all('item')[:3] # 각 3개씩
         for item in items:
-            title = item.title.text
-            link = item.link.text
-            results.append(f"• **{title}**\n  <{link}>")
-        return results
-    except Exception as e:
-        print(f"[{label}] 에러 발생: {e}")
-        return []
-
-def main():
-    # 현재 시간 (한국 시간 기준 출력을 위해 +9시간 하거나 단순 출력)
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            combined_text += f"[{lang}] 제목: {item.title.text}\n링크: {item.link.text}\n\n"
     
-    # 1. 한국 소식
-    kr_url = "https://news.google.com/rss/search?q=붉은사막&hl=ko&gl=KR&ceid=KR:ko"
-    kr_news = get_news(kr_url, "한국")
+    return combined_text
 
-    # 2. 해외 소식 (검색어 범위를 조금 더 넓혔습니다)
-    en_url = "https://news.google.com/rss/search?q=Crimson+Desert+game&hl=en-US&gl=US&ceid=US:en"
-    en_news = get_news(en_url, "해외")
-
-    if not kr_news and not en_news:
-        print("새로운 뉴스가 하나도 없습니다. 전송을 중단합니다.")
-        return
-
-    # 메시지 조립
-    message_parts = [f"📅 **업데이트 시간: {now}**\n"]
+def summarize_news(news_text):
+    if not news_text:
+        return "새로운 뉴스가 없습니다."
     
-    if kr_news:
-        message_parts.append("🇰🇷 **국내 최신 뉴스**")
-        message_parts.extend(kr_news)
+    prompt = f"""
+    아래는 게임 '붉은사막(Crimson Desert)'에 관한 최신 뉴스 목록이야.
+    각 뉴스별로 핵심 내용을 한 문장으로 요약해서 번호표를 붙여서 한글로 알려줘.
+    중요한 업데이트나 출시 관련 소식이 있다면 강조해줘.
     
-    message_parts.append("\n" + "="*30 + "\n")
+    뉴스 목록:
+    {news_text}
+    """
     
-    if en_news:
-        message_parts.append("🌎 **Global News (Crimson Desert)**")
-        message_parts.extend(en_news)
+    response = model.generate_content(prompt)
+    return response.text
 
-    full_content = "\n".join(message_parts)
-
-    # 디스코드 전송
+def send_discord(content):
     webhook_url = os.environ.get('DISCORD_WEBHOOK_URL')
-    if webhook_url:
-        res = requests.post(webhook_url, json={"content": full_content})
-        print(f"디스코드 응답 코드: {res.status_code} (204면 성공)")
-    else:
-        print("WEBHOOK_URL 설정이 없습니다.")
+    # 디스코드 글자 수 제한(2000자)을 고려해 자르기
+    payload = {"content": f"🤖 **AI 요약 붉은사막 소식**\n\n{content[:1800]}"}
+    requests.post(webhook_url, json=payload)
 
 if __name__ == "__main__":
-    main()
+    raw_news = get_news_data()
+    summary = summarize_news(raw_news)
+    send_discord(summary)
