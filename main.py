@@ -4,9 +4,9 @@ import os
 import google.generativeai as genai
 
 # 1. Gemini AI 설정
-genai.configure(api_key=os.environ.get('GEMINI_API_KEY'))
-# 모델명을 확실하게 지정합니다.
-model = genai.GenerativeModel('gemini-1.5-flash-latest')
+# 환경 변수에서 API 키를 가져옵니다.
+API_KEY = os.environ.get('GEMINI_API_KEY')
+genai.configure(api_key=API_KEY)
 
 def get_news_data():
     urls = {
@@ -18,13 +18,13 @@ def get_news_data():
     for lang, url in urls.items():
         try:
             res = requests.get(url, timeout=15)
-            # RSS는 XML 형식이므로 lxml이 설치되어 있다면 'xml'로, 아니라면 'html.parser'로 읽습니다.
+            # lxml 설치 오류를 피하기 위해 기본 html.parser 사용
             soup = BeautifulSoup(res.content, 'html.parser')
             items = soup.find_all('item')[:3]
             for item in items:
                 title = item.title.text if item.title else "제목 없음"
                 link = item.link.text if item.link else ""
-                combined_text += f"[{lang}] 제목: {title}\n링크: {link}\n\n"
+                combined_text += f"[{lang}] {title}\n"
         except Exception as e:
             print(f"{lang} 뉴스 수집 중 오류: {e}")
     
@@ -34,28 +34,37 @@ def summarize_news(news_text):
     if not news_text or len(news_text.strip()) < 10:
         return "수집된 새로운 뉴스가 없습니다."
     
-    prompt = f"""
-    아래 뉴스 목록을 읽고 '붉은사막' 게임에 대한 핵심 내용을 한국어로 요약해줘.
-    - 각 뉴스별로 번호를 매겨서 요약할 것.
-    - 중요한 날짜나 이벤트가 있다면 강조할 것.
-    - 한국어로 친절하게 설명할 것.
-
-    목록:
-    {news_text}
-    """
-    
+    # 404 오류 해결을 위해 가장 표준적인 모델명 사용
+    # 계정에 따라 'gemini-1.5-flash' 혹은 'models/gemini-1.5-flash'가 필요할 수 있음
     try:
-        # 404 오류 방지를 위해 모델 설정 재확인
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        prompt = f"""
+        아래 리스트는 게임 '붉은사막'의 최신 뉴스 제목들이야.
+        이 내용들을 종합해서 한국어로 요약해줘.
+        중요한 정보가 있다면 강조해주고, 뉴스들의 전반적인 분위기를 알려줘.
+
+        뉴스 목록:
+        {news_text}
+        """
+        
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"요약 중 오류 발생: {e}\n(잠시 후 다시 시도하거나 API 키 권한을 확인해 주세요.)"
+        # 첫 번째 시도 실패 시 대안 모델명으로 재시도
+        try:
+            model = genai.GenerativeModel('models/gemini-1.5-flash')
+            response = model.generate_content(prompt)
+            return response.text
+        except:
+            return f"AI 요약 모델 호출 실패: {str(e)}"
 
 def send_discord(content):
     webhook_url = os.environ.get('DISCORD_WEBHOOK_URL')
     if webhook_url:
-        payload = {"content": f"🤖 **AI 요약 붉은사막 소식**\n\n{content[:1800]}"}
-        requests.post(webhook_url, json=payload)
+        # 디스코드 전송 데이터 구성
+        data = {"content": f"🤖 **AI 요약 붉은사막 소식**\n\n{content[:1800]}"}
+        requests.post(webhook_url, json=data)
 
 if __name__ == "__main__":
     raw_news = get_news_data()
